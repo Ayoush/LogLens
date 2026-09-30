@@ -62,9 +62,9 @@ The repository skeleton is in place: folder contracts, shared formatting, and th
 
 ## How contributions work here
 
-Follow these rules so work is tracked, reviewed, and credited automatically.
+The rules for branches, pull requests, commit messages, formatting, and hooks are in [RULES.md](RULES.md). Install the hooks in that file once per clone. After that, `git commit` runs the checks.
 
-A wrong branch name or a missing task link does not produce a loud error from the tracker. The link simply never happens. CI in this repo rejects that pull request so the mistake is visible before merge.
+A wrong branch name or a missing task link does not produce a loud error from the tracker. The link simply never happens. CI rejects that pull request so the mistake is visible before merge.
 
 ### Get these wrong and the automation silently stops working
 
@@ -79,252 +79,6 @@ A wrong branch name or a missing task link does not produce a loud error from th
 - Do not rename the branch after opening the pull request. The link is resolved when the pull request is opened.
 - When the pull request is merged, the task moves to Done automatically.
 - The bot posts a review on every pull request. It checks that task's acceptance criteria one by one and suggests what to read. It never blocks the merge. A failing CI check does block the merge. Those are different signals.
-
-### Branch names
-
-| Who | Branch | Example |
-|---|---|---|
-| Integration | `main` | `main` |
-| Epic owner | `epic<number>` | `epic1`, `epic2` |
-| Everyone else | `task/<number>-short-slug` | `task/1-nginx-status-count` |
-
-Epic branches are the long-lived lines for an epic. Create `epic1` from `main`, and do epic integration work there. Collaborators do not create these branches.
-
-Task branches are one per task card:
-
-```text
-task/<number>-short-slug
-```
-
-- `<number>` is the digits from `INT-<number>` on the card. The branch does not contain the `INT-` prefix.
-- `<short-slug>` is lowercase words separated by single hyphens. It describes the change.
-- Digits may appear inside a slug word. The slug does not start or end with a hyphen.
-- Open the pull request from the task branch into the epic branch, for example `task/1-nginx-status-count` into `epic1`.
-
-These names fail the check:
-
-```text
-feature/nginx-status
-epic-1
-task/INT-1-nginx-status
-task/1_nginx_status
-Task/1-nginx-status
-```
-
-The local hook accepts both shapes, because every clone runs the same script and a git name or email can be changed. It cannot know that you are the person allowed to create `epic1`. GitHub can. After this repo is on GitHub and you are logged in with `gh`, run this once. It lets your user create and push `epic*` branches, and it makes everyone else update those branches through a pull request:
-
-```bash
-actor_id="$(gh api user --jq .id)"
-repo="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
-
-gh api --method POST "repos/${repo}/rulesets" --input - <<EOF
-{
-  "name": "epic-branches",
-  "target": "branch",
-  "enforcement": "active",
-  "bypass_actors": [
-    {"actor_id": ${actor_id}, "actor_type": "User", "bypass_mode": "always"}
-  ],
-  "conditions": {
-    "ref_name": {
-      "include": ["refs/heads/epic*"],
-      "exclude": []
-    }
-  },
-  "rules": [
-    {"type": "creation"},
-    {"type": "deletion"},
-    {"type": "non_fast_forward"},
-    {
-      "type": "pull_request",
-      "parameters": {
-        "required_approving_review_count": 0,
-        "dismiss_stale_reviews_on_push": false,
-        "require_code_owner_review": false,
-        "require_last_push_approval": false,
-        "required_review_thread_resolution": false
-      }
-    }
-  ]
-}
-EOF
-```
-
-Add another GitHub user to `bypass_actors` only if that person should also create epic branches. Everyone not on that list can still create `task/<number>-short-slug` branches and open them against `epic1` or `epic2`.
-
-### Pull request description
-
-The description contains this phrase once, with the real task number:
-
-```text
-Closes INT-1
-```
-
-Capitalization matters. `closes int-1` is a different string. The digits must be the same digits as the branch, so `task/1-nginx-status-count` pairs with `Closes INT-1`.
-
-A second `Closes INT-<number>` line means the pull request is trying to close two tasks. Split it.
-
-The pull request title is a Conventional Commit, because squash merge uses the title as the commit subject on `main`:
-
-```text
-feat: count nginx status codes
-```
-
-GitHub fills in `.github/pull_request_template.md` on a new pull request. Replace `NUMBER` before opening it.
-
-### A complete example
-
-Task card: `INT-1`, count Nginx status codes.
-
-```bash
-git checkout epic1
-git pull
-git checkout -b task/1-nginx-status-count
-```
-
-Commit subjects along the way:
-
-```text
-feat: count nginx status codes
-test: cover missing access log
-```
-
-Pull request title:
-
-```text
-feat: count nginx status codes
-```
-
-Pull request description includes:
-
-```text
-Closes INT-1
-```
-
-After that, leave the branch name alone. Open the pull request into `epic1`. Merge with squash. The task moves to Done.
-
-### Commit messages
-
-Every commit subject is a Conventional Commit:
-
-```text
-<type>(<optional-scope>): <imperative subject>
-```
-
-| Type | Use it for |
-|---|---|
-| `feat` | User-visible behavior |
-| `fix` | A defect |
-| `docs` | Documentation only |
-| `style` | Formatting that does not change behavior |
-| `refactor` | Restructuring that does not change behavior |
-| `perf` | A measured performance change |
-| `test` | Tests only |
-| `build` | Build or dependency setup |
-| `ci` | GitHub Actions or hooks |
-| `chore` | Maintenance that fits none of the above |
-| `revert` | Reverting an earlier commit |
-
-Accepted:
-
-```text
-feat: add nginx status analyzer
-fix: handle missing log file
-docs: describe the parser protocol
-refactor(parsers): share one record type
-chore: update CI workflow
-```
-
-Rejected by the commit-msg hook and again by CI:
-
-```text
-updated stuff
-WIP
-Feat: Add analyzer
-feat: add analyzer.
-```
-
-Rules for the subject line:
-
-- Lowercase type, from the table above.
-- Optional scope in parentheses, lowercase (`feat(parsers): ...`).
-- Colon, then a single space, then an imperative subject.
-- 100 characters or fewer.
-- No trailing period.
-- A breaking change may use `feat!:` or `feat(cli)!:`.
-
-### Formatting
-
-Everyone's editor is expected to produce the same bytes.
-
-| Kind | Rule | Enforced by |
-|---|---|---|
-| All text | UTF-8, LF line endings, file ends with a newline | `.editorconfig`, pre-commit |
-| Python | Ruff format and lint, line length 100, double quotes | `.pre-commit-config.yaml`, `pyproject.toml` |
-| Shell | 4-space indent, ShellCheck clean | shfmt, ShellCheck |
-| YAML, JSON, TOML | 2-space indent, valid syntax | EditorConfig, pre-commit |
-| Secrets | Private keys and `.env` stay local | `detect-private-key`, `.gitignore` |
-
-Python style is configured once in `pyproject.toml`. The pre-commit hook runs the same Ruff version pinned in `.pre-commit-config.yaml`. When you bump Ruff, change both pins in the same pull request.
-
-EditorConfig is the cross-editor contract. `.vscode/settings.json` turns format-on-save on for Python and shell in Cursor and VS Code. Other editors should honor `.editorconfig`.
-
-### Hooks you install locally
-
-| Hook | When | What it does |
-|---|---|---|
-| trailing whitespace, final newline, LF | every commit | stops noisy diffs |
-| YAML, TOML, JSON, merge conflicts | every commit | catches broken config before push |
-| private-key and large-file checks | every commit | keeps secrets and log dumps out |
-| Ruff lint `--fix` and Ruff format | every commit | Python stays on one style |
-| shfmt and ShellCheck | every commit | shell stays on one style |
-| `tools/hooks/check.sh branch` | every commit and every push | branch is `main`, `epic<number>`, or `task/<number>-short-slug` |
-| Conventional Commit check | every commit message | subject matches the types above |
-
-CI runs the same pre-commit hooks, then checks every commit on the pull request, the pull request title, the branch name, and the single `Closes INT-<number>` line. Skipping a local hook still fails the pull request.
-
-Install once, from the repository root:
-
-```bash
-chmod +x tools/hooks/check.sh
-uv tool install pre-commit
-pre-commit install
-pre-commit run --all-files
-```
-
-`uv tool install` puts `pre-commit` on your user PATH. If you already manage it another way, use that install and still run `pre-commit install`. That one command registers the commit, commit-msg, and pre-push hooks, because `.pre-commit-config.yaml` sets `default_install_hook_types`. Run `pre-commit install` again on any clone that installed the hooks before that setting existed.
-
-### What CI checks
-
-| Job | Workflow | Required before merge |
-|---|---|---|
-| `formatting` | `.github/workflows/ci.yml` | pre-commit on every file |
-| `python` | `.github/workflows/ci.yml` | `mypy --strict`, pytest when `tests/test_*.py` exists |
-| `commits` | `.github/workflows/ci.yml` | every commit subject, pull-request only |
-| `contribution-rules` | `.github/workflows/contribution-rules.yml` | branch, title, and exactly one matching `Closes INT-<number>` |
-
-After those jobs have run once on GitHub, protect `main`:
-
-- Require a pull request before merging.
-- Require the four checks: `formatting`, `python`, `commits`, `contribution-rules`.
-- Squash merge, and use the pull request title as the squash commit message.
-- Disallow force-push to `main`.
-
-Those settings live in GitHub. They apply after the workflow files are on `main` and each check has run at least once, because GitHub only offers a check name it has already seen.
-
-### Review
-
-- The task bot comments on acceptance criteria. Read it. It does not block merge.
-- A red required check does block merge. Fix the branch, the `Closes` line, the commit subjects, or the formatting, then push again.
-- Review the diff for behavior, tests, and log safety. Formatting comments are already handled by the hooks.
-- Keep the pull request to one task so the review and the tracker agree.
-
-### Log data and secrets
-
-- Generate practice logs locally. Commit only sanitized fixtures under `tests/fixtures/`.
-- `data/raw_logs/` and `eval/windows/` are gitignored except for their READMEs.
-- Copy `.env.example` to `.env` for the LLM key. `.env` is gitignored.
-- Set a provider spend limit before any paid extraction call.
 
 ---
 
@@ -522,6 +276,7 @@ loglens/
 ├── .python-version
 ├── pyproject.toml
 ├── README.md
+├── RULES.md
 │
 ├── .github/
 │   ├── pull_request_template.md
@@ -1386,7 +1141,7 @@ Document what happened with the malicious log line and which defenses worked or 
 
 # 20. CI and Git workflow
 
-Trunk-based development on `main`, with one long-lived branch per epic (`epic1`, `epic2`) and short-lived `task/<number>-short-slug` branches. One pull request per task, into the epic branch. The full contract, including who may create an epic branch, is in [How contributions work here](#how-contributions-work-here).
+Trunk-based development on `main`, with one long-lived branch per epic (`epic1`, `epic2`) and short-lived `task/<number>-short-slug` branches. One pull request per task, into the epic branch. The full contract for everyone is in [RULES.md](RULES.md).
 
 These files implement it:
 
