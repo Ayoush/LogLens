@@ -26,9 +26,24 @@ Read this file before the first commit. Install the hooks in [Install the checks
 |---|---|---|
 | Integration | `main` | `main` |
 | Epic owner | `epic<number>` | `epic1`, `epic2` |
+| Mentor | `mentor/<slug>` | `mentor/implementation` |
 | Everyone else | `task/<number>-short-slug` | `task/1-nginx-status-count` |
 
 Epic branches are the long-lived lines for an epic. Only the epic owner creates `epic1`, `epic2`, and so on. Collaborators do not create epic branches and do not push directly to them.
+
+Mentor branches are for the mentor's own work, such as implementation notes and shared guidance. The slug is lowercase words separated by hyphens.
+
+```text
+mentor/implementation
+mentor/review-notes
+```
+
+Create and push them the same way as any other allowed branch:
+
+```bash
+git checkout -b mentor/implementation
+git push -u origin mentor/implementation
+```
 
 Task branches are one per task card:
 
@@ -200,7 +215,7 @@ pre-commit run --all-files
 | private-key and large-file checks | every commit | keeps secrets and log dumps out |
 | Ruff lint `--fix` and Ruff format | every commit | Python stays on one style |
 | shfmt and ShellCheck | every commit | shell stays on one style |
-| `tools/hooks/check.sh branch` | every commit and every push | branch is `main`, `epic<number>`, or `task/<number>-short-slug` |
+| `tools/hooks/check.sh branch` | every commit and every push | branch is `main`, `epic<number>`, `mentor/<slug>`, or `task/<number>-short-slug` |
 | Conventional Commit check | every commit message | subject matches the types above |
 
 CI runs the same formatting hooks, then checks every commit on the pull request, the pull request title, the branch name, and the single `Closes INT-<number>` line. Skipping a local hook still fails the pull request.

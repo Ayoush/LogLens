@@ -45,7 +45,7 @@ repos:
   - repo: local
     hooks:
       - id: branch-name
-        name: branch name matches epic<number> or task/<number>-short-slug
+        name: branch name matches epic, task, or mentor/<slug>
         entry: bash tools/hooks/check.sh branch
         language: system
         pass_filenames: false
