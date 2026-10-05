@@ -20,7 +20,7 @@ Runs when a pull request is opened, edited, synchronized, reopened, or marked re
 
 The job fails unless all of these are true:
 
-- The head branch is `epic<number>`, or it is `task/<number>-short-slug` and the base branch is an epic branch.
+- The head branch is `epic<number>` or `mentor/<slug>`, or it is `task/<number>-short-slug` and the base branch is an epic branch.
 - The title is a Conventional Commit, because squash merge uses it as the commit subject.
 - A task pull request body contains exactly one distinct `Closes INT-<number>` phrase, and that number matches the branch.
 - An epic pull request is an integration branch. It does not carry a single task link.

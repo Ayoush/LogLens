@@ -19,6 +19,10 @@ is_task_branch() {
     [[ "$1" =~ ^task/[0-9]+-[a-z0-9]+(-[a-z0-9]+)*$ ]]
 }
 
+is_mentor_branch() {
+    [[ "$1" =~ ^mentor/[a-z0-9]+(-[a-z0-9]+)*$ ]]
+}
+
 valid_subject() {
     local subject=$1
 
@@ -82,7 +86,7 @@ cmd_branch() {
         exit 0
     fi
 
-    if is_epic_branch "$branch" || is_task_branch "$branch"; then
+    if is_epic_branch "$branch" || is_task_branch "$branch" || is_mentor_branch "$branch"; then
         exit 0
     fi
 
@@ -92,6 +96,10 @@ Branch name is not allowed: $branch
 Epic integration branches:
   epic<number>
   Example: epic1
+
+Mentor branches:
+  mentor/<slug>
+  Example: mentor/implementation
 
 Task branches, one per task card:
   task/<number>-short-slug
@@ -153,13 +161,13 @@ cmd_pr() {
     local task_number
     local base=${BASE_REF:-}
 
-    if is_epic_branch "$branch"; then
+    if is_epic_branch "$branch" || is_mentor_branch "$branch"; then
         if ! valid_subject "$title"; then
             echo "ERROR: pull request title is not a Conventional Commit: $title" >&2
             print_subject_help
             exit 1
         fi
-        echo "Epic branch $branch is allowed. Task links are checked on task/* pull requests."
+        echo "Branch $branch is allowed. Task links are checked on task/* pull requests."
         exit 0
     fi
 

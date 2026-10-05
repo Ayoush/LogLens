@@ -1157,7 +1157,7 @@ pyproject.toml
 
 | Check | Enforced by |
 |---|---|
-| Branch `epic<number>` or `task/<number>-short-slug` | `check.sh branch` on commit and push, and `contribution-rules` on the pull request |
+| Branch `epic<number>`, `mentor/<slug>`, or `task/<number>-short-slug` | `check.sh branch` on commit and push, and `contribution-rules` on the pull request |
 | Task pull requests target an epic branch | `contribution-rules`, using the pull request base |
 | Exactly one `Closes INT-<number>`, matching the task branch | `contribution-rules` |
 | Conventional Commits | commit-msg hook, and the `commits` job for every subject on the pull request |

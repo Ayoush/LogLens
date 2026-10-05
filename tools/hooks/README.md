@@ -11,10 +11,10 @@ bash tools/hooks/check.sh pr         # requires HEAD_REF, PR_TITLE, PR_BODY; BAS
 
 | Subcommand | Caller | Pass condition |
 |---|---|---|
-| `branch` | pre-commit and pre-push | Detached HEAD, `main`, `master`, `epic<number>`, or `task/<number>-short-slug` |
+| `branch` | pre-commit and pre-push | Detached HEAD, `main`, `master`, `epic<number>`, `mentor/<slug>`, or `task/<number>-short-slug` |
 | `message` | commit-msg hook | The subject line is a Conventional Commit |
 | `commits` | CI job `commits` | Every subject in `BASE..HEAD` is a Conventional Commit, and none are merge commits |
-| `pr` | CI job `contribution-rules` | Epic head: Conventional Commit title. Task head: title, exactly one `Closes INT-<number>` matching the branch, and the pull request targets `epic<number>` |
+| `pr` | CI job `contribution-rules` | Epic or mentor head: Conventional Commit title. Task head: title, exactly one `Closes INT-<number>` matching the branch, and the pull request targets `epic<number>` |
 
 The script must stay executable (`chmod +x tools/hooks/check.sh`). The shebang check in pre-commit fails the commit otherwise. CI invokes it with `bash`, so GitHub does not depend on the mode bit, but reviewers will still see the hook failure locally.
 
