@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Secrets. Copy .env.example and fill it in locally.
+.env
+.env.*
+!.env.example
+
+# Local log dumps. Commit sanitized copies under tests/fixtures/ instead.
+data/raw_logs/**
+!data/raw_logs/README.md
+eval/windows/**
+!eval/windows/README.md
+*.log
+!tests/fixtures/*.log
+!tests/fixtures/**/*.log
+/access.log
+/auth.log
+/journal.json
+
+# OS and editors
+.DS_Store
+.idea/
+*.swp
+*.swo
+
+# Cursor and VS Code keep the shared settings in .vscode/.
+# Personal workspace state stays out.
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/README.md
