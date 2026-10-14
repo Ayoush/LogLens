@@ -8,4 +8,4 @@ GitHub-facing project files. Nothing in here runs on a laptop until a pull reque
 | `workflows/ci.yml` | Formatting, typecheck, tests, and commit subjects. |
 | `workflows/contribution-rules.yml` | Branch name, pull request title, and the single task link. |
 
-Branch protection is a GitHub setting, not a file. After the four check names have run once (`formatting`, `python`, `commits`, `contribution-rules`), protect `main`, and add the epic-branch ruleset described in the root README. That ruleset is what limits `epic1` and `epic2` to the people who should create them.
+Branch protection is a GitHub setting, not a file. After the four check names have run once (`formatting`, `python`, `commits`, `contribution-rules`), protect `main`, and add the epic-branch ruleset described in the "Epic owner setup" section of [RULES.md](../RULES.md). That ruleset is what limits `epic1` and `epic2` to the people who should create them.

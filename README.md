@@ -1,1478 +1,495 @@
 # LogLens
 
-> **Terminal-first log intelligence for engineers and FDEs.**
->
-> Start with Unix pipelines. Graduate to a typed Python CLI. Finish with validated, structured incident extraction from an LLM.
+> **Terminal-first log intelligence for engineers.**
+> Fast Unix pipelines → a typed Python CLI → validated, structured incident reports from an LLM.
 
-## What is LogLens?
-
-LogLens is a command-line tool for answering the questions you would ask when debugging a customer's Linux server from a terminal:
+LogLens answers the questions you ask when you SSH into a broken server and have nothing but a terminal:
 
 - Which IPs are hammering the server?
-- When did the 5xx errors begin?
-- Which endpoints are failing or becoming slow?
+- When did the 5xx errors start?
+- Which endpoints are failing or slow?
 - Is someone brute-forcing SSH?
-- Did a service restart around the same time as the incident?
-- Can the log evidence be turned into a structured incident report?
+- Did a service restart right before things broke?
+- Can this evidence become a structured incident report?
 
-The project is deliberately built in layers:
+**The one idea behind the project:**
 
-```text
-Raw server logs
-     │
-     ├── Shell layer ────────────────┐
-     │   grep / awk / sed / sort / jq│
-     │                               │
-     │       Fast terminal answers   │
-     │                               │
-     └── Python layer ───────────────┤
-         parse → filter → window     │
-                  │                  │
-                  ↓                  │
-             LLM extraction         │
-                  │                  │
-                  ↓                  │
-           Pydantic validation       │
-                  │                  │
-                  ↓                  │
-          Structured incidents       │
-                                     │
-              ───────────────────────┘
+> Do the deterministic log processing with plain code first. The LLM is an *optional last step*, never the parser.
+
+---
+
+## Contents
+
+1. [How it works](#how-it-works)
+2. [Project status](#project-status)
+3. [Quick start](#quick-start)
+4. [What's in the repo](#whats-in-the-repo)
+5. [The shell toolkit](#the-shell-toolkit)
+6. [The Python CLI (planned)](#the-python-cli-planned)
+7. [LLM incident extraction](#llm-incident-extraction)
+8. [Testing and evaluation](#testing-and-evaluation)
+9. [Contributing](#contributing)
+10. [Roadmap and Definition of Done](#roadmap-and-definition-of-done)
+11. [Out of scope](#out-of-scope)
+12. [Troubleshooting](#troubleshooting)
+
+---
+
+## How it works
+
+LogLens has two layers that read the same raw logs. Use whichever fits the moment.
+
+```mermaid
+flowchart LR
+    LOGS[("Raw logs<br/>nginx · auth.log · journald")]
+
+    subgraph SHELL["Shell layer — instant answers"]
+        direction TB
+        S1["scripts/*.sh<br/>grep · awk · sort · uniq · jq"]
+        S2["auditor/*.sh<br/>permission and secret checks"]
+    end
+
+    subgraph PY["Python layer — structured pipeline"]
+        direction TB
+        P1["Parse"] --> P2["Filter"] --> P3["Window"] --> P4["LLM extract"] --> P5["Validate"]
+    end
+
+    LOGS --> SHELL
+    LOGS --> PY
+    SHELL --> OUT1["Terminal output"]
+    P5 --> OUT2["Validated incidents<br/>table · json · jsonl"]
 ```
 
-The central engineering idea is simple:
+| Layer | Best for | Needs an API key? |
+|---|---|---|
+| **Shell** | "What is happening *right now*?" Quick triage on any Linux box. | No |
+| **Python** | Repeatable, typed analysis across several log formats. | Only for the final `extract` step |
 
-> **The machine should do deterministic log processing first. The LLM should be the optional final reasoning stage, not the thing doing all the parsing.**
+### Why build it this way?
+
+| Habit | What it means here |
+|---|---|
+| Terminal first | Everything works over plain SSH, with no GUI. |
+| Clarify before coding | Requirements, estimates, and an SLO are written down before the Python. |
+| Composition over inheritance | Parser, filter, and sink are small pieces plugged together. |
+| One internal format | Every parser outputs the same `LogRecord`. |
+| Stream, don't load | Iterators and generators, so a huge log never becomes one giant list. |
+| LLM output is untrusted | Validate against a schema and repair bad output. |
+| Measure everything | Benchmark speed and memory, compare estimated and actual cost. |
+| Ship it | CI, a tagged release, docs, and a short demo are part of "done". |
 
 ---
 
 ## Project status
 
-**Epic:** 0 — Terminal-First Foundations
-**Target duration:** 2 weeks, roughly 25–30 focused hours
-**Primary environment:** local Ubuntu machine
-**Primary interface:** terminal
-**Final milestone:** `v1.0.0`
+This is **Epic 0 — Terminal-First Foundations** of a larger learning roadmap: about two weeks, targeting a `v1.0.0` release.
 
-This README describes the complete Epic 0 scope. The project is intentionally small enough to finish, measure, release, and demo before moving to later infrastructure work.
-
-The repository skeleton is in place: folder contracts, shared formatting, and the contribution checks below. Product code lands with the task that owns it.
-
----
-
-## How contributions work here
-
-The rules for branches, pull requests, commit messages, formatting, and hooks are in [RULES.md](RULES.md). Install the hooks in that file once per clone. After that, `git commit` runs the checks.
-
-A wrong branch name or a missing task link does not produce a loud error from the tracker. The link simply never happens. CI rejects that pull request so the mistake is visible before merge.
-
-### Get these wrong and the automation silently stops working
-
-1. **Put `Closes INT-<number>` in the pull request description.** This is how the pull request is linked to the task. Without that exact phrase, the pull request is not connected to anything.
-2. **Name the branch `task/<number>-short-slug`.** Example: `task/3-kanban-board-ui-layout`. This is the backup link, and it is a checked rule.
-3. **Use the task number printed on the task card.** That number looks like `INT-<number>`. A wrong number links the work to someone else's task, and merging marks that task complete.
-4. **Open one pull request per task.** If a pull request covers two tasks, only one gets linked. The other is never tracked.
-
-### Also worth knowing
-
-- Link the GitHub account before joining. Pull requests can only be credited to a linked account.
-- Do not rename the branch after opening the pull request. The link is resolved when the pull request is opened.
-- When the pull request is merged, the task moves to Done automatically.
-- The bot posts a review on every pull request. It checks that task's acceptance criteria one by one and suggests what to read. It never blocks the merge. A failing CI check does block the merge. Those are different signals.
-
----
-
-## Why build this?
-
-LogLens is not just a log-parser project. It is training a set of engineering habits that the later roadmap depends on:
-
-1. **Terminal-first debugging** — work comfortably on a machine where a GUI is not available.
-2. **Clarify before coding** — define requirements, non-goals, estimates, SLOs, and trade-offs first.
-3. **Composition over inheritance** — keep pipeline components small and replaceable.
-4. **Typed boundaries** — normalize different log formats into one internal representation.
-5. **Streaming instead of loading everything into memory** — a large log should not require a giant in-memory list.
-6. **LLM output is untrusted** — validate model output against a schema and repair invalid responses.
-7. **Measure the result** — benchmark parsing, measure token usage, evaluate extraction quality, and compare estimates against reality.
-8. **Ship the project** — CI, release automation, documentation, a tagged release, and a short demo are part of the definition of done.
-
----
-
-## What you will build
-
-By the end of the epic, the repository should contain:
-
-| Artifact | Purpose |
+| Area | State |
 |---|---|
-| `dotfiles` | Reusable terminal/Neovim/tmux/Git setup |
-| `bootstrap.sh` | Reproduce the workstation on a clean user account |
-| `shell/loglens.sh` | Fast Unix-pipeline log analysis |
-| `shell/permaudit.sh` | Permission and security audit |
-| `loglens` | Typed Python CLI |
-| `docs/design.md` | Requirements, estimates, SLO, trade-offs, cost model |
-| `docs/bandit-notes.md` | OverTheWire Bandit notes |
-| `eval/report.md` | Extraction and cost evaluation |
-| `v1.0.0` | Tagged, installable release |
+| Repo skeleton, CI, pre-commit hooks, contribution rules | ✅ Done |
+| `scripts/nginx_status_count.sh` — status code counts (INT-1) | ✅ Done |
+| `scripts/ip_rate_analyzer.sh` — IPs over a request threshold (INT-3) | ✅ Done |
+| `auditor/check_file_modes.sh` — unsafe file modes | ✅ Done |
+| `auditor/check_ssh_permissions.sh` — `~/.ssh` permissions | ✅ Done |
+| `auditor/check_env_leaks.sh` — secrets in files and env (masked output) | ✅ Done |
+| JSON error extractor with `jq` (INT-2) | ⏳ Merged, then reverted — to be redone |
+| Full shell toolkit (`shell/loglens.sh`) | ⏳ Planned |
+| Design doc (`docs/design.md`) | ⏳ Planned |
+| Python CLI (`parse`, `stats`, `windows`) | ⏳ Planned |
+| LLM incident extractor + evaluation | ⏳ Planned |
+| `v1.0.0` release | ⏳ Planned |
+
+> The Python package under `src/loglens/` currently exports only its version. The module layout is documented in each folder's own `README.md`.
 
 ---
 
-# 1. The mental model
+## Quick start
 
-If the project feels too abstract, think about one ugly log file first.
+### Prerequisites
 
-Suppose `access.log` contains:
+- Linux (Ubuntu 24.04 LTS or similar) and Bash
+- Python 3.12+ and [`uv`](https://docs.astral.sh/uv/)
+- `jq`, `shellcheck`, `shfmt`
 
-```text
-10.0.0.1 - - [29/Sep/2026:10:00:01 +0530] "GET /" 200 123 "-" "curl"
-10.0.0.2 - - [29/Sep/2026:10:00:02 +0530] "GET /login" 200 421 "-" "Mozilla/5.0"
-10.0.0.3 - - [29/Sep/2026:10:00:03 +0530] "GET /api" 500 912 "-" "curl"
-10.0.0.3 - - [29/Sep/2026:10:00:04 +0530] "GET /api" 500 901 "-" "curl"
+### Set up
+
+```bash
+git clone https://github.com/Ayoush/LogLens.git
+cd LogLens
+
+uv sync --all-groups        # install the dev tools (mypy, pytest, ruff)
+uv tool install pre-commit  # then register the git hooks (details in RULES.md)
+pre-commit install
+cp .env.example .env        # only needed for the LLM step; never commit it
 ```
 
-A human may ask:
+### Try the shell tools
 
-> How many requests were successful?
+Create a tiny sample in standard Nginx format (field 1 is the IP, field 9 is the status code):
 
-> How many requests failed?
+```bash
+mkdir -p data/raw_logs
+cat > data/raw_logs/access.log <<'EOF'
+10.0.0.1 - - [29/Sep/2026:10:00:01 +0530] "GET / HTTP/1.1" 200 123 "-" "curl"
+10.0.0.2 - - [29/Sep/2026:10:00:02 +0530] "GET /login HTTP/1.1" 200 421 "-" "Mozilla/5.0"
+10.0.0.3 - - [29/Sep/2026:10:00:03 +0530] "GET /api HTTP/1.1" 500 912 "-" "curl"
+10.0.0.3 - - [29/Sep/2026:10:00:04 +0530] "GET /api HTTP/1.1" 500 901 "-" "curl"
+EOF
 
-> Which IP is making the most requests?
+scripts/nginx_status_count.sh data/raw_logs/access.log
+# 500 2
+# 200 2
 
-> Did the 500 errors happen together?
-
-LogLens turns those questions into repeatable commands.
-
-The earliest work items are intentionally tiny. For example, the first three starter tasks are:
-
-```text
-INT-1  Count Nginx HTTP status codes
-INT-2  Extract ERROR entries from JSON logs using jq
-INT-3  Find IPs that cross a request-count threshold
+scripts/ip_rate_analyzer.sh data/raw_logs/access.log 1
+# 2 10.0.0.3
 ```
 
-They are not the whole application. They are the first building blocks for the larger shell toolkit.
+Files in `data/raw_logs/` are gitignored. To share a fixture, sanitize it and put it in `tests/fixtures/`.
+
+### Run the auditors
+
+```bash
+auditor/check_file_modes.sh /some/directory    # SUID, SGID, world-writable files and dirs
+auditor/check_ssh_permissions.sh               # ~/.ssh, authorized_keys, private keys
+auditor/check_env_leaks.sh /some/path          # API keys and passwords (values are masked)
+```
+
+Exit codes are meaningful: `0` means clean, `1` means findings, `2` means a usage error.
 
 ---
 
-# 2. Architecture
+## What's in the repo
+
+```text
+LogLens/
+├── scripts/       Small single-purpose log analyzers (INT-1, INT-3)
+├── auditor/       Permission and secret auditors
+├── shell/         Planned: loglens.sh toolkit and shared lib/
+├── src/loglens/   Planned: Python package (parsers/, extract/, CLI)
+├── tests/         pytest tests; fixtures/ holds sanitized sample logs
+├── eval/          Planned: evaluation scripts and windows
+├── docs/          Planned: design.md, ADRs, lab notes
+├── data/          Local, gitignored raw logs
+├── tools/hooks/   check.sh — branch, commit, and PR rule checks
+├── .github/       CI workflows and the PR template
+├── RULES.md       Contribution rules (read this first)
+└── pyproject.toml uv project, ruff, mypy --strict, pytest config
+```
+
+Every folder has its own `README.md` explaining what belongs there.
+
+---
+
+## The shell toolkit
+
+The shell layer is deliberately simple. The goal is to get fast at `awk | sort | uniq -c | sort -rn`.
+
+Each tool is one pipeline:
 
 ```mermaid
 flowchart LR
-    subgraph Sources
-        A[nginx access.log]
-        B[/var/log/auth.log]
-        C[journalctl -o json]
-    end
-
-    subgraph Shell[Shell Layer]
-        S1[loglens.sh]
-        S2[permaudit.sh]
-    end
-
-    subgraph Python[Python Layer]
-        R[Reader]
-        P[Parser Registry]
-        P1[NginxParser]
-        P2[SyslogParser]
-        P3[JSONLogParser]
-        F[Filters]
-        W[Windowing]
-        X[IncidentExtractor]
-        L[LLM SDK]
-        V[Pydantic Validation]
-        RP[Repair Loop]
-        K[Sinks]
-    end
-
-    A --> S1
-    B --> S1
-    C --> S1
-
-    A --> R
-    B --> R
-    C --> R
-
-    R --> P
-    P --> P1
-    P --> P2
-    P --> P3
-
-    P1 --> F
-    P2 --> F
-    P3 --> F
-
-    F --> K
-    F --> W
-    W --> X
-    X --> L
-    L --> V
-    V -->|valid| K
-    V -->|invalid| RP
-    RP --> L
+    A["access.log"] --> B["awk '{print $9}'<br/>extract a field"]
+    B --> C["sort<br/>group equal values"]
+    C --> D["uniq -c<br/>count each group"]
+    D --> E["sort -rn<br/>biggest first"]
+    E --> F["200 1250<br/>404 182<br/>500 73"]
 ```
 
-## Core pipeline
+| Script | What it does | Task |
+|---|---|---|
+| `scripts/nginx_status_count.sh FILE` | Counts HTTP status codes, most frequent first | INT-1 |
+| `scripts/ip_rate_analyzer.sh FILE N` | Lists IPs with more than `N` requests | INT-3 |
+| `auditor/check_file_modes.sh DIR` | Flags SUID/SGID files and world-writable files/dirs | — |
+| `auditor/check_ssh_permissions.sh` | Checks `~/.ssh` is `700` and keys are `600` | — |
+| `auditor/check_env_leaks.sh PATH` | Finds secrets in files and env vars, masks the values | — |
 
-The Python pipeline is designed around composition:
+All scripts use `set -euo pipefail`, write errors to stderr, and return a non-zero exit code on bad input. They must pass ShellCheck.
 
-```text
-Reader
-  ↓
-Parser
-  ↓
-Filters
-  ↓
-Windowing
-  ↓
-IncidentExtractor
-  ↓
-LLM
-  ↓
-Pydantic validation
-  ↓
-Repair / retry when invalid
-  ↓
-Sink
-```
-
-Each component should have one clear responsibility.
-
-### Design principles
-
-**1. Composition over inheritance**
-
-A parser is a component in the pipeline. Avoid a deep class hierarchy such as:
-
-```text
-BaseParser → RegexParser → NginxParser
-```
-
-Prefer small components connected by interfaces.
-
-**2. One internal log representation**
-
-All parsers produce a common `LogRecord`.
-
-That means filters, windowing, and sinks do not need to know whether an event came from Nginx, syslog, or journald.
-
-**3. The LLM is optional**
-
-Everything before incident extraction should work without an API key. That makes the deterministic core testable and keeps the LLM at the end of the pipeline.
-
-**4. Streaming**
-
-Files should be processed with iterators/generators so a large log does not become a giant Python list in memory.
+**Planned commands** for `shell/loglens.sh`: `top-ips`, `status`, `5xx-per-min`, `top-paths`, `slowest`, `user-agents`, `ssh-fails`, `ssh-users`, `journal-errors`, `restarts`, `big-files`, `window`. Rotated and gzipped logs will be read with `zcat -f access.log*`.
 
 ---
 
-# 3. Repository structure
+## The Python CLI (planned)
 
-Folders below exist now. Each one has a README that says what belongs there and which task adds the implementation files. The Python modules, shell commands, and design docs are the target layout; they arrive with the task that owns them.
+### Pipeline
+
+Each stage has a single job and the stages are plugged together (composition, not inheritance):
+
+```mermaid
+flowchart LR
+    R[Reader] --> PA[Parser]
+    PA --> FI[Filters]
+    FI --> SI[Sink]
+    FI --> WI[Windowing]
+    WI --> EX[IncidentExtractor]
+    EX --> LL[LLM]
+    LL --> VA[Pydantic validation]
+    VA -->|valid| SI
+    VA -->|invalid| RE[Repair and retry]
+    RE --> LL
+```
+
+Everything up to the `Sink` runs **without an API key**.
+
+### Core types
+
+```mermaid
+classDiagram
+    class LogParser {
+        <<Protocol>>
+        +name str
+        +can_parse(sample) bool
+        +parse(lines) Iterator~LogRecord~
+    }
+    class NginxParser
+    class SyslogParser
+    class JSONLogParser
+    class LogRecord {
+        <<frozen>>
+        +ts datetime
+        +source str
+        +host Optional~str~
+        +level Level
+        +message str
+        +fields dict
+        +raw str
+    }
+
+    LogParser <|.. NginxParser
+    LogParser <|.. SyslogParser
+    LogParser <|.. JSONLogParser
+    LogParser ..> LogRecord : yields
+```
+
+- `LogParser` is a **`Protocol`**, so a new parser can plug in without inheriting from anything.
+- The extensibility test: *can a fourth parser be added without editing the existing parsers or the pipeline?*
+
+### Commands
 
 ```text
-loglens/
-├── .editorconfig
-├── .env.example
-├── .gitignore
-├── .pre-commit-config.yaml
-├── .python-version
-├── pyproject.toml
-├── README.md
-├── RULES.md
-│
-├── .github/
-│   ├── pull_request_template.md
-│   └── workflows/
-│       ├── ci.yml
-│       └── contribution-rules.yml
-│
-├── .vscode/
-│   ├── extensions.json
-│   └── settings.json
-│
-├── data/
-│   └── raw_logs/                 gitignored except README
-│
-├── docs/
-│   └── adr/
-│
-├── eval/
-│   └── windows/                  gitignored except README
-│
-├── scripts/                      INT-1, INT-2, INT-3
-├── shell/
-│   └── lib/
-│
-├── src/
-│   └── loglens/
-│       ├── parsers/
-│       └── extract/
-│
-├── tests/
-│   └── fixtures/                 sanitized logs safe to commit
-│
-└── tools/
-    └── hooks/
-        └── check.sh              branch, commit, and PR rules
-```
-
-Target files, added by later tasks:
-
-```text
-shell/loglens.sh
-shell/permaudit.sh
-shell/lib/common.sh
-src/loglens/cli.py
-src/loglens/models.py
-src/loglens/readers.py
-src/loglens/filters.py
-src/loglens/windowing.py
-src/loglens/sinks.py
-src/loglens/config.py
-src/loglens/parsers/{base,nginx,syslog,jsonlog}.py
-src/loglens/extract/{prompts,client,extractor}.py
-tests/test_{parsers,filters,windowing,extractor}.py
-eval/run_eval.py
-eval/report.md
-docs/{design,bandit-notes,fs-lab,one-liners,permissions}.md
-docs/adr/0000-trunk-based.md
-docs/adr/0001-composition-over-inheritance.md
-uv.lock                          created by `uv lock`, then committed
-```
-
----
-
-# 4. Log sources
-
-Epic 0 focuses on three source categories:
-
-### Nginx access logs
-
-Used for:
-
-- status counts
-- top IPs
-- top paths
-- 5xx bursts
-- slow endpoints
-- user-agent analysis
-
-### SSH / syslog logs
-
-Used for:
-
-- failed passwords
-- invalid users
-- brute-force patterns
-- login-related investigation
-
-### Journald JSON
-
-Exported with `journalctl -o json` and used for:
-
-- errors
-- service restarts
-- system events
-- machine-readable log fields
-
-For local practice, generate the traffic yourself. The project does not require a real external attack or production server.
-
----
-
-# 5. Getting started
-
-## Prerequisites
-
-The original project scope assumes a local Ubuntu environment and a terminal-first workflow.
-
-You need:
-
-- Ubuntu 24.04 LTS or similar
-- `tmux`
-- Neovim
-- Git
-- `jq`
-- `yq`
-- `ripgrep`
-- `fd`
-- `fzf`
-- `bat`
-- `eza`
-- `zoxide`
-- `shellcheck`
-- Nginx
-- an SSH server bound to localhost
-- Python tooling through `uv`
-- an LLM API key for the final extraction stage
-
-Keep the LLM key out of Git and set a hard provider spend limit before using the paid stage.
-
-## Terminal-first setup
-
-The environment is intentionally part of the project.
-
-Use:
-
-```bash
-# install SSH server
-sudo apt install openssh-server
-
-# verify local SSH
-ssh localhost
-
-# create an SSH key
-ssh-keygen -t ed25519
-```
-
-The SSH server should listen only on `127.0.0.1` for this epic.
-
-Create an alias in `~/.ssh/config`:
-
-```text
-Host ll
-    HostName 127.0.0.1
-```
-
-Then:
-
-```bash
-ssh ll
-```
-
-The project also uses `tmux` so that your terminal session remains recoverable.
-
----
-
-# 6. Generate realistic sample data
-
-The project needs realistic logs before the parsing work starts.
-
-## Nginx
-
-Install Nginx:
-
-```bash
-sudo apt install nginx
-```
-
-Use a custom log format that includes request time:
-
-```nginx
-log_format timed '$remote_addr - $remote_user [$time_local] "$request" '
-                 '$status $body_bytes_sent "$http_referer" "$http_user_agent" '
-                 'rt=$request_time';
-
-access_log /var/log/nginx/access.log timed;
-```
-
-Generate local traffic that contains:
-
-- normal requests
-- 404s
-- 5xx bursts
-- slow requests
-
-Keep a sanitized copy in the repository as a test fixture.
-
-## SSH failures
-
-For local practice, generate failed authentication events against `localhost` while the SSH server remains localhost-only. Restore password authentication settings afterwards.
-
-If `/var/log/auth.log` is unavailable, use the SSH service events from `journalctl` instead.
-
-## Journald JSON
-
-Export a fixture with:
-
-```bash
-journalctl -o json --since "2 days ago" > journal.json
-```
-
-Never commit real IPs, usernames, secrets, or other sensitive production data.
-
----
-
-# 7. Starter tasks
-
-These are the first tasks to make the project concrete.
-
-## INT-1 — Nginx status code aggregator
-
-### Goal
-
-Create:
-
-```text
-scripts/nginx_status_count.sh
-```
-
-Input:
-
-```text
-data/raw_logs/access.log
-```
-
-Command:
-
-```bash
-scripts/nginx_status_count.sh data/raw_logs/access.log
-```
-
-Expected behavior:
-
-```text
-200 1250
-404 182
-500 73
-502 21
-```
-
-Acceptance criteria:
-
-- the script exists
-- the script is executable
-- it accepts the log path
-- status codes are counted correctly
-- counts are sorted by descending frequency
-- a missing file returns exit code `1`
-- the error is written to stderr
-
-### What this teaches
-
-```text
-awk → extract a field
-sort → order the values
-uniq -c → count repetitions
-sort -rn → highest count first
-```
-
----
-
-## INT-2 — JSON error extractor
-
-### Goal
-
-Create:
-
-```text
-scripts/json_error_extractor.sh
-```
-
-Input:
-
-```text
-data/raw_logs/app.json
-```
-
-Filter:
-
-```text
-.level == "ERROR"
-```
-
-Output:
-
-```json
-[
-  {
-    "timestamp": "...",
-    "message": "...",
-    "trace_id": "..."
-  }
-]
-```
-
-Acceptance criteria:
-
-- the script exists and is executable
-- `jq` performs the filtering
-- only error entries are returned
-- the output is valid JSON
-- each object contains timestamp, message, and trace ID
-
-### What this teaches
-
-```text
-JSON input
-   ↓
-jq select()
-   ↓
-field projection
-   ↓
-valid JSON output
-```
-
----
-
-## INT-3 — IP rate analyzer
-
-### Goal
-
-Create:
-
-```text
-scripts/ip_rate_analyzer.sh
-```
-
-Command:
-
-```bash
-scripts/ip_rate_analyzer.sh data/raw_logs/access.log 100
-```
-
-Expected behavior:
-
-```text
-1832 10.0.0.1
-945  10.0.0.2
-431  10.0.0.7
-```
-
-Only IPs with more than the specified number of requests are shown.
-
-Acceptance criteria:
-
-- accepts a log path and threshold
-- counts requests per IP
-- filters by threshold
-- prints `COUNT IP`
-- sorts numerically from highest to lowest
-
-### What this teaches
-
-```text
-extract field
-    ↓
-sort
-    ↓
-uniq -c
-    ↓
-awk threshold
-    ↓
-sort -rn
-```
-
----
-
-# 8. Shell toolkit
-
-After the starter tasks, these small scripts become one reusable shell tool.
-
-The target command set is:
-
-```text
-loglens.sh top-ips
-loglens.sh status
-loglens.sh 5xx-per-min
-loglens.sh top-paths
-loglens.sh slowest
-loglens.sh user-agents
-loglens.sh ssh-fails
-loglens.sh ssh-users
-loglens.sh journal-errors
-loglens.sh restarts
-loglens.sh big-files
-loglens.sh window
-```
-
-Examples:
-
-```bash
-./shell/loglens.sh top-ips /var/log/nginx/access.log
-./shell/loglens.sh status /var/log/nginx/access.log
-./shell/loglens.sh 5xx-per-min /var/log/nginx/access.log
-./shell/loglens.sh ssh-fails /var/log/auth.log
-./shell/loglens.sh journal-errors journal.json
-```
-
-The toolkit should support rotated logs, including compressed files, where appropriate.
-
-A useful pattern is:
-
-```bash
-zcat -f access.log*
-```
-
-The shell layer is deliberately boring. That is a feature: the goal is to become extremely fast with Unix text-processing primitives.
-
----
-
-# 9. Permission auditor
-
-The second shell tool is:
-
-```text
-shell/permaudit.sh
-```
-
-It checks for things such as:
-
-- world-writable files
-- world-writable directories without the sticky bit
-- setuid/setgid files
-- extended ACLs
-- login-shell users
-- sudo membership
-- sensitive file modes
-- current `umask`
-
-The project includes a safe lab folder where deliberately bad permissions can be planted and detected.
-
-**Important:** do permission experiments inside the lab folder, not arbitrary system locations.
-
----
-
-# 10. Design before Python
-
-Before implementing the typed Python system, write:
-
-```text
-docs/design.md
-```
-
-The design document must include:
-
-### Clarifying questions
-
-Examples:
-
-- Which log sources are required?
-- How much data arrives per day?
-- Can logs leave the machine?
-- Do logs contain PII?
-- Is the workflow real-time or after-the-fact?
-- Who consumes the output?
-- What is the budget ceiling?
-- What is the retention requirement?
-
-### Functional requirements
-
-Examples:
-
-- parse Nginx, syslog, and journal JSON
-- filter by time, host, level, and regex
-- group records into time windows
-- extract incidents
-- export structured output
-
-### Non-functional requirements
-
-Examples:
-
-- bounded processing time
-- bounded memory
-- controlled LLM cost
-- privacy safeguards
-- offline operation before extraction
-
-### Estimation
-
-Record formulas and measured inputs for:
-
-- lines/day
-- average bytes/line
-- storage/day
-- storage/month
-- peak lines/sec
-- windows/day
-- tokens/window
-- tokens/day
-- extraction cost/day
-
-### SLO
-
-Define an explicit target for extraction latency and schema validity.
-
-### Trade-offs
-
-Document decisions such as:
-
-- regex parsers vs generic parsing libraries
-- raw log lines vs pre-aggregated summaries
-- synchronous vs asynchronous model calls
-- one provider vs multiple providers
-
-### Non-goals
-
-State what will deliberately not be built in Epic 0.
-
----
-
-# 11. Python CLI
-
-The Python system is where LogLens becomes a reusable software product rather than a collection of shell commands.
-
-## Internal model
-
-Every parser creates a `LogRecord` with a common shape:
-
-```python
-class LogRecord(BaseModel, frozen=True):
-    ts: datetime
-    source: str
-    host: str | None = None
-    level: Level = Level.INFO
-    message: str
-    fields: dict[str, str | int | float] = Field(default_factory=dict)
-    raw: str
-```
-
-## Parser interface
-
-Use a `Protocol` rather than forcing every parser into an inheritance hierarchy.
-
-Conceptually:
-
-```python
-class LogParser(Protocol):
-    name: str
-
-    def can_parse(self, sample: str) -> bool: ...
-
-    def parse(self, lines: Iterable[str]) -> Iterator[LogRecord]: ...
-```
-
-Initial parsers:
-
-```text
-NginxParser
-SyslogParser
-JSONLogParser
-```
-
-The extensibility test is important:
-
-> Can a fourth parser be added without editing the existing parser implementations or pipeline code?
-
----
-
-# 12. Filters and windowing
-
-After parsing, the records should be filterable without caring about their original source.
-
-Examples:
-
-```text
-since(timestamp)
-until(timestamp)
-min_level(level)
-matches(regex)
-```
-
-Then group the records into fixed-size windows, for example:
-
-```text
-10:00 → 10:05
-10:05 → 10:10
-10:10 → 10:15
-```
-
-Each window should contain useful aggregate information such as:
-
-- counts by severity
-- counts by status
-- counts by source
-- top IPs
-- top paths
-- representative log lines
-
-This is an important architecture decision because **the model should not receive an entire raw log when a compact summary can preserve the useful signal.**
-
----
-
-# 13. CLI design
-
-The target command-line interface is:
-
-```text
-loglens parse FILE... [--format auto|nginx|syslog|journal]
-                 [--since] [--until] [--level] [--grep]
-                 [--out table|json|jsonl]
-
-loglens stats FILE... [--by status|ip|path|level|unit] [--top 10]
+loglens parse   FILE... [--format auto|nginx|syslog|journal]
+                        [--since] [--until] [--level] [--grep]
+                        [--out table|json|jsonl]
+
+loglens stats   FILE... [--by status|ip|path|level|unit] [--top 10]
 
 loglens windows FILE... [--minutes 5]
 
-loglens extract FILE... [--minutes 5]
-                   [--concurrency 4]
-                   [--model ...]
-                   [--dry-run]
+loglens extract FILE... [--minutes 5] [--concurrency 4]
+                        [--model ...] [--dry-run]
 ```
 
-The `--dry-run` extraction path should estimate tokens and projected cost without making a paid model call.
+`--dry-run` estimates tokens and cost **without** making a paid call.
+
+### Windowing
+
+Records are grouped into fixed time windows (for example five minutes). Each window carries a compact summary: counts by severity, status, and source; top IPs and paths; and a few representative lines. The model receives that summary, **not** the full raw log.
 
 ---
 
-# 14. LLM incident extraction
+## LLM incident extraction
 
-This is the final and most AI-specific layer.
+### The flow
 
-## Input
+```mermaid
+sequenceDiagram
+    participant W as Window summary
+    participant E as Extractor
+    participant M as LLM
+    participant V as Pydantic
 
-A compact time window containing:
+    W->>E: aggregates + sample lines
+    E->>M: prompt (logs wrapped as data)
+    M-->>E: text response
+    E->>V: parse JSON and validate
+    alt valid
+        V-->>E: Incident objects
+    else invalid (up to N retries)
+        V-->>E: validation errors
+        E->>M: repair prompt with the errors
+        M-->>E: corrected response
+        E->>V: validate again
+    end
+    E-->>W: ExtractionResult, or a recorded failure
+```
 
-- window start/end
-- aggregates
-- a limited number of representative log lines
-
-## Output
-
-The model must return a structure equivalent to:
+### The output schema
 
 ```python
-class Evidence(BaseModel):
-    ts: datetime
-    line: str = Field(max_length=500)
-
-
 class Incident(BaseModel):
     title: str = Field(max_length=120)
     severity: Literal["low", "medium", "high", "critical"]
-    category: Literal[
-        "availability",
-        "performance",
-        "security",
-        "config",
-        "resource",
-        "other",
-    ]
+    category: Literal["availability", "performance", "security", "config", "resource", "other"]
     start: datetime
     end: datetime
     affected: list[str]
     probable_cause: str = Field(max_length=400)
     evidence: list[Evidence] = Field(min_length=1, max_length=5)
     confidence: float = Field(ge=0, le=1)
-
-
-class ExtractionResult(BaseModel):
-    window_start: datetime
-    window_end: datetime
-    incidents: list[Incident]
 ```
 
-## Why validation matters
+### Three rules for using an LLM safely
 
-LLMs can return:
+1. **Validate everything.** Models return prose around JSON, fenced JSON, bad enum values, and truncated output. Parse, validate, repair, and give up after a bounded number of retries.
+2. **Logs are attacker-controlled.** A user-agent or SSH username can contain text that looks like instructions. Wrap logs in `<logs>…</logs>`, tell the model it is *data*, and test with a malicious fixture.
+3. **Control cost.** Parse and aggregate first, send small windows, use `--dry-run` before spending money, and compare the estimate against actual usage.
 
-- prose around JSON
-- fenced JSON
-- invalid enum values
-- wrong field types
-- truncated output
-- missing required fields
-
-The extraction loop should therefore be:
-
-```text
-Prompt model
-     ↓
-Receive text
-     ↓
-Parse JSON
-     ↓
-Pydantic validation
-     │
-     ├── valid ─────────→ return result
-     │
-     └── invalid
-              ↓
-         build repair prompt
-              ↓
-         retry within bound
-              ↓
-         validate again
+```mermaid
+flowchart LR
+    A["1M raw lines"] --> B["Deterministic parse"] --> C["Aggregate"] --> D["5-minute windows"] --> E["Few evidence lines"] --> F["LLM"]
 ```
 
-The extractor should also use bounded concurrency and backoff rather than firing unlimited requests at the provider.
+Secrets go in `.env` (see `.env.example`: `LOGLENS_LLM_API_KEY`, `LOGLENS_LLM_MODEL`, `LOGLENS_LLM_BASE_URL`). It is gitignored. Set a hard spend limit with your provider before any paid run.
 
 ---
 
-# 15. Prompt safety
+## Testing and evaluation
 
-Logs are attacker-controlled data.
+**Tests never touch the network.** The LLM is replaced by a fake client.
 
-A user-agent or SSH username could contain text that looks like instructions.
-
-The prompt should therefore explicitly distinguish **data** from **instructions**.
-
-Conceptually:
-
-```text
-<logs>
-... attacker-controlled log data ...
-</logs>
-```
-
-and the system instruction should say that the contents are data, not instructions.
-
-The evaluation suite includes a malicious fixture to test this behavior.
-
----
-
-# 16. Cost control
-
-The LLM is not the first parser.
-
-The intended cost-control strategy is:
-
-```text
-Raw logs
-   ↓
-Deterministic parsing
-   ↓
-Aggregation
-   ↓
-5-minute windows
-   ↓
-Small sample of evidence lines
-   ↓
-LLM
-```
-
-This reduces both token usage and unnecessary model calls.
-
-The CLI should support:
-
-```bash
-loglens extract ... --dry-run
-```
-
-before any paid execution.
-
-Actual token usage should be recorded and compared against the original estimate in the evaluation report.
-
----
-
-# 17. Testing strategy
-
-The project should be testable without a real LLM connection.
-
-## Parser tests
-
-At least one golden test per parser:
-
-```text
-NginxParser
-SyslogParser
-JSONLogParser
-```
-
-Also include malformed-line tests.
-
-## Filter tests
-
-Test each filter independently.
-
-## Windowing tests
-
-Test boundary conditions, especially records exactly on a window edge.
-
-## CLI smoke tests
-
-Use Typer's CLI runner.
-
-## LLM tests
-
-Use a fake client that returns:
-
-1. valid JSON
-2. JSON inside code fences
-3. prose + JSON
-4. invalid enum followed by valid repaired output
-5. permanently invalid output
-
-No test should need the network.
-
----
-
-# 18. Benchmarking
-
-Create a generated dataset containing approximately one million Nginx lines.
-
-Measure:
-
-- elapsed time
-- peak memory
-- behavior under a one-CPU / 1 GB memory constraint
-
-The important requirement is constant-memory streaming rather than simply achieving a fast laptop benchmark.
-
----
-
-# 19. Evaluation
-
-The final evaluation should contain measurable evidence, not just "it worked on my machine."
-
-## Schema validity
-
-Run extraction on 200 windows:
-
-```text
-Before repair
-After repair
-Mean attempts/window
-```
-
-Target: at least 95% schema-valid output after repair.
-
-## Correctness
-
-Hand-label 30 windows and report:
-
-- incident precision
-- incident recall
-- category agreement
-
-## Cost
-
-Compare:
-
-```text
-estimated daily cost
-vs
-actual measured daily cost
-```
-
-Explain any meaningful gap.
-
-## Security / injection
-
-Document what happened with the malicious log line and which defenses worked or failed.
-
----
-
-# 20. CI and Git workflow
-
-Trunk-based development on `main`, with one long-lived branch per epic (`epic1`, `epic2`) and short-lived `task/<number>-short-slug` branches. One pull request per task, into the epic branch. The full contract for everyone is in [RULES.md](RULES.md).
-
-These files implement it:
-
-```text
-.pre-commit-config.yaml
-tools/hooks/check.sh
-.github/pull_request_template.md
-.github/workflows/ci.yml
-.github/workflows/contribution-rules.yml
-.editorconfig
-pyproject.toml
-```
-
-| Check | Enforced by |
+| Area | What is tested |
 |---|---|
-| Branch `epic<number>` or `task/<number>-short-slug` | `check.sh branch` on commit and push, and `contribution-rules` on the pull request |
-| Task pull requests target an epic branch | `contribution-rules`, using the pull request base |
-| Exactly one `Closes INT-<number>`, matching the task branch | `contribution-rules` |
-| Conventional Commits | commit-msg hook, and the `commits` job for every subject on the pull request |
-| Ruff, shfmt, ShellCheck, whitespace, secrets | pre-commit locally and the `formatting` job |
-| `mypy --strict` and pytest | `python` job. Pytest runs once `tests/test_*.py` exists |
+| Parsers | A golden test per parser, plus malformed lines |
+| Filters | Each filter independently |
+| Windowing | Boundaries, especially records exactly on a window edge |
+| CLI | Smoke tests with Typer's runner |
+| LLM | Fake client returning: valid JSON, fenced JSON, prose + JSON, invalid enum then repaired, permanently invalid |
 
-Release automation is still a later exit criterion for `v1.0.0`. It is not part of this skeleton.
+**Quality gates in CI:** Ruff, shfmt, ShellCheck, secret scanning, `mypy --strict`, and pytest.
 
-Accepted subjects:
+**Evaluation (planned, in `eval/report.md`):**
 
-```text
-feat: add nginx status analyzer
-fix: handle missing log file
-chore: update CI workflow
+| Measure | Target |
+|---|---|
+| Schema validity after repair, over 200 windows | ≥ 95% |
+| Precision / recall / category agreement, on 30 hand-labelled windows | Reported |
+| Estimated vs actual daily LLM cost | Gap explained |
+| Prompt-injection fixture | Behavior documented |
+| Benchmark on ~1M generated Nginx lines | Constant memory, within a 1 CPU / 1 GB limit |
+
+---
+
+## Contributing
+
+Read **[RULES.md](RULES.md)** before your first commit. The short version:
+
+```mermaid
+flowchart LR
+    A["epic branch<br/>epic1, epic2"] --> B["task/N-short-slug"]
+    B --> C["Commits<br/>Conventional Commits"]
+    C --> D["PR into the epic branch<br/>with 'Closes INT-N'"]
+    D --> E{"CI green?"}
+    E -->|yes| F["Merge → task moves to Done"]
+    E -->|no| C
 ```
 
-Rejected:
+1. **Branch name:** `task/<number>-short-slug`, for example `task/3-ip-rate-analyzer`.
+2. **PR description** contains exactly one `Closes INT-<number>` matching the branch number.
+3. **One PR per task**, opened against the epic branch.
+4. **Conventional Commits:** `feat: add nginx status analyzer`, `fix: handle missing log file`, `chore: update CI`.
+5. Hooks run on `git commit`. Install them once per clone with `uv tool install pre-commit && pre-commit install`.
 
-```text
-updated stuff
+A wrong branch name or task link fails silently in the tracker, so CI rejects it to make the mistake visible.
+
+---
+
+## Roadmap and Definition of Done
+
+```mermaid
+gantt
+    title Epic 0 — two-week plan
+    dateFormat  YYYY-MM-DD
+    axisFormat  Day %d
+    section Linux and shell
+    Terminal, tmux, SSH, dotfiles      :a1, 2026-01-01, 2d
+    Nginx logs and fixtures            :a2, after a1, 1d
+    Shell toolkit and permission audit :a3, after a2, 3d
+    section Design
+    Design doc and ADRs                :b1, after a3, 1d
+    section Python
+    Models, parsers, filters, windows  :c1, after b1, 3d
+    Sinks, CLI, benchmark              :c2, after c1, 1d
+    section AI
+    Schema, repair loop, real client   :d1, after c2, 2d
+    section Ship
+    Evaluation, release, write-up      :e1, after d1, 2d
 ```
 
-Keep each pull request small enough to review in one sitting.
+Do 30 minutes of [OverTheWire Bandit](https://overthewire.org/wargames/bandit/) every night alongside.
+
+### Definition of Done
+
+**Linux and shell**
+- [ ] `bootstrap.sh` reproduces the environment on a clean user
+- [ ] Bandit level 20+ completed, with notes
+- [ ] `loglens.sh` works on fixtures and compressed logs
+- [ ] Ten random log questions answerable in under two minutes each
+- [ ] Permission auditor catches the planted lab problems
+
+**Engineering practice**
+- [ ] Trunk-based workflow enforced, Conventional Commits enforced, CI green
+- [ ] Release automation produces `v1.0.0`
+- [ ] DORA numbers recorded (tag frequency, lead time from first commit to merge)
+
+**Design**
+- [ ] `docs/design.md` has clarifying questions, FR/NFR, estimates with formulas, an SLO, trade-offs, and non-goals
+
+**Python**
+- [ ] `mypy --strict` passes and core coverage is at least 85%
+- [ ] Three parsers share one `Protocol`; a fourth can be added with minimal changes
+- [ ] 1M lines parse in constant memory
+
+**AI**
+- [ ] Schema validity measured on 200 windows; precision/recall on 30 labelled windows
+- [ ] `--dry-run` works; no test calls the network; no secrets committed
+- [ ] Prompt-injection behavior documented
+
+**Presentation**
+- [ ] README has architecture and metrics; a short terminal demo exists
+- [ ] The whole system can be demoed in about five minutes
 
 ---
 
-# 21. DORA metrics
+## Out of scope
 
-The project includes a small script to calculate delivery metrics from Git history.
-
-At minimum, capture:
-
-- deployment frequency / tag frequency
-- lead time from first commit to merge
-
-The point is not to optimize the numbers artificially. The point is to understand the engineering system you created.
-
----
-
-# 22. Two-week execution plan
-
-| Day | Focus | Output |
-|---|---|---|
-| 1 | Terminal, tmux, local SSH | `ssh ll` works |
-| 2 | Dotfiles, bootstrap, CI, pre-commit | first PR merged |
-| 3 | Nginx logs, traffic generation, fixtures, filesystem lab | sanitized fixtures |
-| 4 | First half of shell toolkit | commands tested |
-| 5 | Remaining shell commands, gzip support, report | ShellCheck clean |
-| 6 | Permission auditor + lab | `permaudit.sh` |
-| 7 | Design sheet + ADR + class diagram | `docs/design.md` |
-| 8 | Models, Protocol, Nginx parser | parser tests green |
-| 9 | Syslog + journal parsers, filters, windowing | core pipeline works |
-| 10 | Sinks, CLI, streaming, benchmark | parse/stats/windows complete |
-| 11 | Incident schema, fake LLM, repair loop | extractor tests green |
-| 12 | Real client, concurrency, backoff, redaction, dry-run | real extraction works |
-| 13 | Evaluation, labels, cost check, README | `eval/report.md` |
-| 14 | Release, clean install, write-up, retro | `v1.0.0` |
-
-Every night:
-
-```text
-30 minutes of OverTheWire Bandit
-```
-
----
-
-# 23. Definition of Done
-
-## Linux and shell
-
-- [ ] A new user can reproduce the environment with `bootstrap.sh`.
-- [ ] Bandit level 20+ is completed with notes.
-- [ ] `loglens.sh` works on fixtures and compressed logs.
-- [ ] Ten random log questions can be answered in under two minutes each.
-- [ ] `permaudit.sh` catches the planted lab problems.
-- [ ] The filesystem lab is completed and explained.
-
-## Engineering practice
-
-- [ ] Trunk-based workflow is enforced.
-- [ ] Epic branches use `epic<number>`, and task branches use `task/<number>-short-slug`.
-- [ ] Every pull request description contains one `Closes INT-<number>` for that same number.
-- [ ] Conventional commits are enforced.
-- [ ] CI is green.
-- [ ] Release automation produces `v1.0.0`.
-- [ ] DORA numbers are recorded.
-
-## Design
-
-- [ ] `docs/design.md` contains clarifying questions.
-- [ ] FR/NFR are documented.
-- [ ] Estimates include formulas and measured inputs.
-- [ ] SLO is defined.
-- [ ] Trade-offs and non-goals are explicit.
-- [ ] Actual and estimated LLM cost are compared.
-
-## Python
-
-- [ ] `mypy --strict` passes.
-- [ ] Core coverage is at least 85%.
-- [ ] Three parsers share one Protocol.
-- [ ] A fourth parser can be added with minimal existing-code changes.
-- [ ] One million log lines can be parsed with constant memory within the chosen NFR.
-
-## AI
-
-- [ ] Schema-validity evaluation is run on 200 windows.
-- [ ] Repair improves the validity rate to the project target.
-- [ ] Precision/recall is measured on 30 labelled windows.
-- [ ] No tests call the real network.
-- [ ] `--dry-run` cost estimation works.
-- [ ] No secrets are committed.
-- [ ] Prompt-injection fixture behavior is documented.
-
-## Presentation
-
-- [ ] README contains architecture and metrics.
-- [ ] A short terminal demo/GIF exists.
-- [ ] A technical write-up is drafted.
-- [ ] The whole system can be demonstrated in roughly five minutes.
-
----
-
-# 24. What is deliberately NOT being built yet?
-
-Epic 0 does **not** try to become a full observability platform.
-
-Out of scope:
+Epic 0 deliberately does **not** build:
 
 - real-time tailing daemons
-- web UI
+- a web UI
 - database-backed log storage
 - multi-machine log shipping
 - container deployment
-- multi-provider LLM gateway
+- a multi-provider LLM gateway
 
-These are deliberately deferred to later work.
-
-That boundary is important. A strong engineering project is not just a list of features; it also explains what it refuses to build in the current version.
+Possible stretch work *after* the Definition of Done: `loglens tail -f`, a second LLM provider behind the same interface, a local Ollama model, a Dockerfile, signed incident webhooks, and Postgres-backed storage.
 
 ---
 
-# 25. Future extensions
+## Troubleshooting
 
-Only after the Definition of Done is complete, possible stretch work includes:
-
-| Extension | Later concept |
-|---|---|
-| `loglens tail -f` | streaming |
-| second LLM provider behind the same interface | provider gateway |
-| local Ollama model | local inference |
-| Dockerfile | containers |
-| signed incident webhook | webhook integrations |
-| Postgres-backed storage | database architecture |
-
-Do not let stretch goals replace the core deliverables.
-
----
-
-# 26. Troubleshooting
-
-| Problem | Likely cause | Direction |
+| Problem | Likely cause | Fix |
 |---|---|---|
-| `Permission denied (publickey)` | SSH key or file permissions | check `~/.ssh` and `authorized_keys` permissions |
-| `/var/log/auth.log` missing | `rsyslog` is not installed | install it or use `journalctl -u ssh` |
-| `uniq -c` counts look wrong | input was not sorted | sort before `uniq` |
-| pipeline exits unexpectedly with `pipefail` | upstream gets SIGPIPE from `head` | understand and handle intentionally |
-| Nginx timestamp parse fails | format/timezone mismatch | use the documented `%d/%b/%Y:%H:%M:%S %z` format |
-| syslog year is wrong | classic syslog omits year | inject year and handle Dec → Jan rollover |
-| many LLM results fail validation | malformed output or too-strict schema | tighten prompt, strip fences, review constraints |
-| HTTP 429 during extraction | concurrency too high | reduce concurrency and add backoff/jitter |
-| disk full but `du` is small | deleted file still open | inspect with `lsof` for deleted descriptors |
+| `Permission denied (publickey)` | Wrong SSH key or file permissions | Run `auditor/check_ssh_permissions.sh` |
+| `/var/log/auth.log` is missing | `rsyslog` not installed | Install it, or use `journalctl -u ssh` |
+| `uniq -c` counts look wrong | Input was not sorted | `sort` before `uniq` |
+| Pipeline exits early under `pipefail` | Upstream got SIGPIPE from `head` | Handle it deliberately |
+| Nginx timestamp won't parse | Format or timezone mismatch | Use `%d/%b/%Y:%H:%M:%S %z` |
+| Syslog year is wrong | Classic syslog has no year | Inject the year and handle the Dec → Jan rollover |
+| Many LLM results fail validation | Malformed output or an over-strict schema | Tighten the prompt, strip code fences, review constraints |
+| HTTP 429 during extraction | Concurrency too high | Lower `--concurrency`, add backoff with jitter |
+| Disk is full but `du` looks small | A deleted file is still held open | Find it with `lsof +L1` |
 
 ---
 
-# 27. Interview stories this project gives you
+## Learning resources
 
-## Reliable LLM output
-
-> "I do not trust raw model output. I constrain the schema, validate with Pydantic, repair invalid responses, bound retries, and measure the before/after validity rate."
-
-## LLM cost control
-
-> "I aggregate logs before prompting, estimate cost with a dry run, record actual usage, and compare measured cost against the design estimate."
-
-## Debugging a customer's server
-
-> "I can triage an unfamiliar log dump from a terminal using repeatable Unix pipelines before reaching for more infrastructure."
-
-## Protocol vs inheritance
-
-> "The parser boundary uses structural typing so a new parser can plug in without inheriting from our base class."
-
-## Security in AI systems
-
-> "Logs are attacker-controlled input, so I treat them as data, delimit them, validate evidence, and test the behavior against an injection fixture."
-
-## System design
-
-> "Before coding, I wrote clarifying questions, FR/NFR, estimates, SLOs, cost assumptions, trade-offs, and non-goals."
-
----
-
-# 28. Learning resources
-
-The project guide recommends resources across the major skills being practiced:
-
-### Linux
-
-- Linux Journey
-- *The Linux Command Line* — William Shotts
-- OverTheWire Bandit
-- Julia Evans' Linux zines
-- *The AWK Programming Language*
-- `jq` documentation
-
-### Git / DevOps
-
-- Pro Git
-- DORA
-- Conventional Commits
-- Trunk Based Development
-- pre-commit
-- release automation documentation
-
-### Low-level design
-
-- Refactoring.Guru
-- *A Philosophy of Software Design* — John Ousterhout
-- Python `typing.Protocol` / PEP 544
-
-### Python / AI
-
-- `uv`
-- Pydantic v2
-- Typer
-- Python `asyncio`
-- Anthropic API documentation
-- OpenAI API documentation
-
-### System design
-
-- Latency numbers / back-of-the-envelope estimation references
-- Google SRE material on SLOs
-- Your model provider's current pricing documentation
-
----
-
-# 29. The project in one picture
-
-```text
-                         LOG FILES
-                            │
-             ┌──────────────┴──────────────┐
-             │                             │
-             ▼                             ▼
-       SHELL TOOLKIT                 PYTHON CLI
-     grep / awk / jq                parse / filter
-             │                      window / sink
-             │                             │
-             │                             ▼
-             │                     5-minute windows
-             │                             │
-             │                             ▼
-             │                       LLM extractor
-             │                             │
-             │                             ▼
-             │                    Pydantic validation
-             │                             │
-             │                   ┌─────────┴─────────┐
-             │                   │                   │
-             │                 valid              invalid
-             │                   │                   │
-             │                   ▼                   ▼
-             │                incident          repair/retry
-             │                                       │
-             └───────────────────────────────────────┘
-
-                     MEASURE → TEST → RELEASE
-```
-
----
-
-# 30. Final goal
-
-LogLens is complete when you can sit at a terminal, receive an unfamiliar server log dump, and demonstrate a clear progression:
-
-```text
-raw logs
-   ↓
-fast Unix triage
-   ↓
-structured parsing
-   ↓
-time-windowed analysis
-   ↓
-incident extraction
-   ↓
-validated structured output
-   ↓
-measured quality + measured cost
-```
-
-The goal is not to build the biggest log platform.
-
-The goal is to build a **small, complete, measurable system** that demonstrates Linux fluency, practical shell skills, clean Python design, system-design thinking, reliable LLM integration, and the ability to ship.
+- **Linux:** Linux Journey · *The Linux Command Line* (Shotts) · OverTheWire Bandit · Julia Evans' zines · `jq` manual
+- **Git / DevOps:** Pro Git · Conventional Commits · Trunk Based Development · DORA · pre-commit
+- **Design:** Refactoring.Guru · *A Philosophy of Software Design* (Ousterhout) · PEP 544 (`typing.Protocol`) · Google SRE book on SLOs
+- **Python / AI:** `uv` · Pydantic v2 · Typer · `asyncio` · Anthropic and OpenAI API docs
 
 ---
 
 ## License
 
-Choose a license before publishing the repository publicly. The project guide does not prescribe a specific license.
-
----
-
-## Author / Project Notes
-
-Use this section for your own project links, demo video, architecture notes, release history, and learning notes as the project evolves.
+No license has been chosen yet. Pick one before making the repository public.
