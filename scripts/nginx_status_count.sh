@@ -13,8 +13,8 @@ if [[ ! -f "$log_file" ]]; then
     exit 1
 fi
 
-awk '{print $9}' "$log_file" |
-    sort |
-    uniq -c |
-    sort -rn |
-    awk '{print $2, $1}'
+awk '{print $9}' "$log_file" \
+    | sort \
+    | uniq -c \
+    | sort -rn \
+    | awk '{print $2, $1}'

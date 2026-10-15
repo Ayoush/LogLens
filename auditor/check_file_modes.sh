@@ -18,7 +18,7 @@ while [[ $# -gt 0 ]]; do
             IGNORE_SYMLINKS=true
             shift
             ;;
-        -h|--help)
+        -h | --help)
             print_usage
             exit 0
             ;;
@@ -69,9 +69,9 @@ declare -a ww_dirs=()
 # Determine file predicate based on --ignore-symlinks flag
 declare -a file_type
 if [[ "$IGNORE_SYMLINKS" == true ]]; then
-    file_type=( "-type" "f" )
+    file_type=("-type" "f")
 else
-    file_type=( "(" "-type" "f" "-o" "-type" "l" ")" )
+    file_type=("(" "-type" "f" "-o" "-type" "l" ")")
 fi
 
 # Single-pass filesystem traversal: evaluates all 4 conditions independently
@@ -100,28 +100,28 @@ done < <(find "$TARGET" \
     \( "${file_type[@]}" -perm -0002 -printf 'WW_FILE\t%m\t%M\t%u:%g\t%p\n' \) , \
     \( -type d -perm -0002 ! -perm -1000 -printf 'WW_DIR\t%m\t%M\t%u:%g\t%p\n' \) 2>/dev/null || true)
 
-if (( ${#suid_records[@]} > 0 )); then
+if ((${#suid_records[@]} > 0)); then
     echo "[CRITICAL] SUID files detected (Set User ID bit active):"
     printf '%s\n' "${suid_records[@]}"
     echo ""
     unsafe_found=1
 fi
 
-if (( ${#sgid_records[@]} > 0 )); then
+if ((${#sgid_records[@]} > 0)); then
     echo "[WARNING] SGID files detected (Set Group ID bit active):"
     printf '%s\n' "${sgid_records[@]}"
     echo ""
     unsafe_found=1
 fi
 
-if (( ${#ww_files[@]} > 0 )); then
+if ((${#ww_files[@]} > 0)); then
     echo "[CRITICAL] World-writable files detected (other has write permission):"
     printf '%s\n' "${ww_files[@]}"
     echo ""
     unsafe_found=1
 fi
 
-if (( ${#ww_dirs[@]} > 0 )); then
+if ((${#ww_dirs[@]} > 0)); then
     echo "[CRITICAL] World-writable directories WITHOUT sticky bit detected:"
     printf '%s\n' "${ww_dirs[@]}"
     echo ""
